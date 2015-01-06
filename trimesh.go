@@ -14,8 +14,18 @@ var (
 	triRayCallbacks = map[TriMesh]TriRayCallback{}
 )
 
+var (
+	triMeshData map[uintptr]TriMeshData = make(map[uintptr]TriMeshData, 0)
+)
+
+// Important note: The trimesh copies the data. If Destroy isn't called
+// a memory leak will occur.
+
 // TriMeshData represents triangle mesh data.
-type TriMeshData uintptr
+type TriMeshData struct {
+	id    uintptr
+	verts unsafe.Pointer
+}
 
 func cToTriMeshData(c C.dTriMeshDataID) TriMeshData {
 	return TriMeshData(unsafe.Pointer(c))
@@ -35,11 +45,27 @@ func (t TriMeshData) Destroy() {
 	C.dGeomTriMeshDataDestroy(t.c())
 }
 
-// Build builds a triangle mesh from the given data.
-func (t TriMeshData) Build(verts VertexList, tris TriVertexIndexList) {
-	C.dGeomTriMeshDataBuildSimple(t.c(), (*C.dReal)(&verts[0][0]), C.int(len(verts)),
-		(*C.dTriIndex)(&tris[0][0]), C.int(len(tris)))
+// 4 float64 per vert is required here.
+func (t TriMeshData) Build(verts []float64, tris []uint32) {
+	C.dGeomTriMeshDataBuildSimple(t.c(), (*C.dReal)(&verts[0]), C.int(len(verts)),
+		(*C.dTriIndex)(&tris[0]), C.int(len(tris)))
 }
+
+// 3 float64 per vert.
+func (t TriMeshData) BuildDouble(verts []float64, tris []uint32) {
+	C.dGeomTriMeshDataBuildDouble(t.c(),
+		unsafe.Pointer(&verts[0]), C.int(3*8), C.int(len(verts)),
+		unsafe.Pointer(&tris[0]), C.int(len(tris)), C.int(3*4))
+}
+
+// 3 float32 per vert.
+func (t TriMeshData) BuildSingle(verts []float32, tris []uint32) {
+	C.dGeomTriMeshDataBuildSingle(t.c(),
+		unsafe.Pointer(&verts[0]), C.int(3*4), C.int(len(verts)),
+		unsafe.Pointer(&tris[0]), C.int(len(tris)), C.int(3*4))
+}
+
+// TODO: Add support for more complex trimesh data?
 
 // Preprocess preprocesses the triangle mesh data.
 func (t TriMeshData) Preprocess() {

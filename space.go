@@ -43,6 +43,7 @@ type Space interface {
 	NewCylinder(radius, length float64) Cylinder
 	NewRay(length float64) Ray
 	NewHeightfield(data HeightfieldData, placeable bool) Heightfield
+	NewTriMesh(data TriMeshData) TriMesh
 	NewSimpleSpace() SimpleSpace
 	NewHashSpace() HashSpace
 	NewQuadTreeSpace(center, extents Vector3, depth int) QuadTreeSpace
