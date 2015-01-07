@@ -14,18 +14,83 @@ var (
 	triRayCallbacks = map[TriMesh]TriRayCallback{}
 )
 
-var (
-	triMeshData map[uintptr]TriMeshData = make(map[uintptr]TriMeshData, 0)
-)
-
-// Important note: The trimesh copies the data. If Destroy isn't called
-// a memory leak will occur.
+// Important note: The TriMeshData copies the vertex/index and normal data.
+// If Destroy isn't called a memory leak will occur.
 
 // TriMeshData represents triangle mesh data.
-type TriMeshData struct {
-	id    uintptr
-	verts unsafe.Pointer
+type TriMeshData uintptr
+
+type triMeshDataCopy struct {
+	verts   unsafe.Pointer
+	nverts  C.int
+	vstride C.int
+	tris    unsafe.Pointer
+	ntris   C.int
+	tstride C.int
 }
+
+func newTriMeshDataCopy(verts []float64, tris []uint32) triMeshDataCopy {
+	t := triMeshDataCopy{}
+
+	t.verts = C.malloc(C.size_t(len(verts) * 8))
+	C.memcpy(t.verts, unsafe.Pointer(&verts[0]), C.size_t(len(verts)*8))
+	t.nverts = C.int(len(verts))
+	t.vstride = C.int(8 * 4)
+
+	t.tris = C.malloc(C.size_t(len(tris) * 4))
+	t.ntris = C.int(len(tris))
+	t.tstride = C.int(3 * 4)
+	C.memcpy(t.tris, unsafe.Pointer(&tris[0]), C.size_t(len(tris)*4))
+
+	return t
+}
+
+func newTriMeshDataCopyDouble(verts []float64, tris []uint32) triMeshDataCopy {
+	t := triMeshDataCopy{}
+
+	t.verts = C.malloc(C.size_t(len(verts) * 8))
+	C.memcpy(t.verts, unsafe.Pointer(&verts[0]), C.size_t(len(verts)*8))
+	t.nverts = C.int(len(verts))
+	t.vstride = C.int(8 * 3)
+
+	t.tris = C.malloc(C.size_t(len(tris) * 4))
+	t.ntris = C.int(len(tris))
+	t.tstride = C.int(3 * 4)
+	C.memcpy(t.tris, unsafe.Pointer(&tris[0]), C.size_t(len(tris)*4))
+
+	return t
+}
+
+func newTriMeshDataCopySingle(verts []float32, tris []uint32) triMeshDataCopy {
+	t := triMeshDataCopy{}
+
+	t.verts = C.malloc(C.size_t(len(verts) * 4))
+	C.memcpy(t.verts, unsafe.Pointer(&verts[0]), C.size_t(len(verts)*4))
+	t.nverts = C.int(len(verts))
+	t.vstride = C.int(4 * 3)
+
+	t.tris = C.malloc(C.size_t(len(tris) * 4))
+	t.ntris = C.int(len(tris))
+	t.tstride = C.int(3 * 4)
+	C.memcpy(t.tris, unsafe.Pointer(&tris[0]), C.size_t(len(tris)*4))
+
+	return t
+}
+
+func (t triMeshDataCopy) destroy() {
+	if t.verts != nil {
+		C.free(t.verts)
+		t.verts = nil
+	}
+	if t.tris != nil {
+		C.free(t.tris)
+		t.tris = nil
+	}
+}
+
+var (
+	triMeshData map[TriMeshData]triMeshDataCopy = make(map[TriMeshData]triMeshDataCopy, 0)
+)
 
 func cToTriMeshData(c C.dTriMeshDataID) TriMeshData {
 	return TriMeshData(unsafe.Pointer(c))
@@ -42,27 +107,52 @@ func NewTriMeshData() TriMeshData {
 
 // Destroy destroys the triangle mesh data.
 func (t TriMeshData) Destroy() {
+	data, ok := triMeshData[t]
+	if ok {
+		data.destroy()
+		delete(triMeshData, t)
+	}
 	C.dGeomTriMeshDataDestroy(t.c())
 }
 
 // 4 float64 per vert is required here.
 func (t TriMeshData) Build(verts []float64, tris []uint32) {
-	C.dGeomTriMeshDataBuildSimple(t.c(), (*C.dReal)(&verts[0]), C.int(len(verts)),
-		(*C.dTriIndex)(&tris[0]), C.int(len(tris)))
+	data, ok := triMeshData[t]
+	if ok {
+		data.destroy()
+	}
+	data = newTriMeshDataCopy(verts, tris)
+	triMeshData[t] = data
+	C.dGeomTriMeshDataBuildSimple(t.c(), (*C.dReal)(data.verts), data.nverts,
+		(*C.dTriIndex)(data.tris), data.ntris)
 }
 
 // 3 float64 per vert.
 func (t TriMeshData) BuildDouble(verts []float64, tris []uint32) {
+	data, ok := triMeshData[t]
+	if ok {
+		data.destroy()
+	}
+	data = newTriMeshDataCopyDouble(verts, tris)
+	triMeshData[t] = data
+
 	C.dGeomTriMeshDataBuildDouble(t.c(),
-		unsafe.Pointer(&verts[0]), C.int(3*8), C.int(len(verts)),
-		unsafe.Pointer(&tris[0]), C.int(len(tris)), C.int(3*4))
+		data.verts, data.vstride, data.nverts,
+		data.tris, data.ntris, data.tstride)
 }
 
 // 3 float32 per vert.
 func (t TriMeshData) BuildSingle(verts []float32, tris []uint32) {
+	data, ok := triMeshData[t]
+	if ok {
+		data.destroy()
+	}
+	data = newTriMeshDataCopySingle(verts, tris)
+	triMeshData[t] = data
+
 	C.dGeomTriMeshDataBuildSingle(t.c(),
-		unsafe.Pointer(&verts[0]), C.int(3*4), C.int(len(verts)),
-		unsafe.Pointer(&tris[0]), C.int(len(tris)), C.int(3*4))
+		data.verts, data.vstride, data.nverts,
+		data.tris, data.ntris, data.tstride)
 }
 
 // TODO: Add support for more complex trimesh data?
